@@ -1,4 +1,3 @@
-
 <!-- frontend/src/views/HotelDetail.vue -->
 <template>
   <div class="hotel-detail-page">
@@ -43,7 +42,7 @@
         <!-- Error State -->
         <div v-if="error" class="alert alert-danger">
           {{ error }}
-          <button @click="loadHotelDetail" class="retry-btn">Tekrar dene</button>
+          <button @click="fetchHotelDetail" class="retry-btn">Tekrar dene</button>
         </div>
 
         <!-- Hotel Detail -->
@@ -114,28 +113,28 @@
             <div class="tabs-nav">
               <button 
                 :class="{ active: activeTab === 'overview' }"
-                @click="activeTab = 'overview'"
+                @click="onTabChange('overview')"
                 class="tab-btn"
               >
                 Genel Bakış
               </button>
               <button 
                 :class="{ active: activeTab === 'amenities' }"
-                @click="activeTab = 'amenities'"
+                @click="onTabChange('amenities')"
                 class="tab-btn"
               >
                 Özellikler
               </button>
               <button 
                 :class="{ active: activeTab === 'location' }"
-                @click="activeTab = 'location'"
+                @click="onTabChange('location')"
                 class="tab-btn"
               >
                 Konum
               </button>
               <button 
                 :class="{ active: activeTab === 'reviews' }"
-                @click="activeTab = 'reviews'"
+                @click="onTabChange('reviews')"
                 class="tab-btn"
               >
                 Yorumlar
@@ -171,13 +170,19 @@
                   <h3>Konum</h3>
                   <p class="address">{{ hotel.address || `${hotel.city}, ${hotel.country}` }}</p>
                   
-                  <!-- Simple map placeholder -->
-                  <div class="location-map">
-                    <div class="map-placeholder">
-                      <span class="map-icon">🗺️</span>
-                      <p>Harita</p>
-                      <small>Koordinatlar: {{ hotel.latitude }}, {{ hotel.longitude }}</small>
-                    </div>
+                  <!-- Embedded Map -->
+                  <div class="hotel-map-container">
+                    <div 
+                      ref="hotelMapContainer"
+                      id="hotelMapContainer"
+                      class="hotel-map"
+                    ></div>
+                  </div>
+                  
+                  <div class="location-actions">
+                    <button @click="showOnMap" class="map-btn">
+                      🗺️ Büyük Haritada Göster
+                    </button>
                   </div>
                 </div>
               </div>
@@ -221,7 +226,17 @@
 
 <script>
 import { mapState, mapActions, mapGetters } from 'vuex'
+import L from 'leaflet'
+import 'leaflet/dist/leaflet.css'
 import LoginModal from '@/components/LoginModal.vue'
+
+// Fix for default markers
+delete L.Icon.Default.prototype._getIconUrl
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+})
 
 export default {
   name: 'HotelDetail',
@@ -232,7 +247,8 @@ export default {
     return {
       showLoginModal: false,
       hotel: null,
-      activeTab: 'overview'
+      activeTab: 'overview',
+      hotelMap: null
     }
   },
   computed: {
@@ -249,11 +265,14 @@ export default {
   methods: {
     ...mapActions(['loadHotelDetail', 'logout']),
 
-    async loadHotelDetail() {
+    async fetchHotelDetail() {
       const hotelId = this.$route.params.id
+      console.log('Loading hotel detail for ID:', hotelId)
+      
       try {
         const hotelData = await this.loadHotelDetail(hotelId)
         this.hotel = hotelData
+        console.log('Hotel data loaded:', hotelData)
       } catch (error) {
         console.error('Error loading hotel detail:', error)
       }
@@ -262,24 +281,109 @@ export default {
     handleLoginSuccess(user) {
       console.log('Login successful:', user)
       // Reload hotel detail to show member prices
-      this.loadHotelDetail()
+      this.fetchHotelDetail()
     },
 
     async handleLogout() {
       await this.logout()
       // Reload hotel detail to hide member prices
-      this.loadHotelDetail()
+      this.fetchHotelDetail()
     },
 
     formatPrice(price) {
       return new Intl.NumberFormat('tr-TR').format(price)
+    },
+
+    showOnMap() {
+      // Ana sayfadaki büyük haritaya git
+      this.$router.push('/map')
+    },
+
+    initializeHotelMap() {
+      // Konum sekmesi açıldığında haritayı başlat
+      if (this.hotel && this.hotel.latitude && this.hotel.longitude) {
+        this.$nextTick(() => {
+          if (this.$refs.hotelMapContainer && !this.hotelMap) {
+            const lat = parseFloat(this.hotel.latitude)
+            const lng = parseFloat(this.hotel.longitude)
+            
+            if (!isNaN(lat) && !isNaN(lng)) {
+              this.hotelMap = L.map('hotelMapContainer').setView([lat, lng], 15)
+              
+              L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors'
+              }).addTo(this.hotelMap)
+
+              // Fiyatı belirle
+              const hotelPrice = this.currentUser && this.hotel.member_price_display < this.hotel.base_price 
+                ? this.hotel.member_price_display 
+                : this.hotel.base_price
+
+              const priceText = this.formatPrice(hotelPrice) + ' TL'
+              
+              // Custom marker
+              const customIcon = L.divIcon({
+                className: 'custom-hotel-marker',
+                html: `
+                  <div style="
+                    background: #007bff;
+                    color: white;
+                    font-size: 12px;
+                    font-weight: bold;
+                    padding: 6px 12px;
+                    border-radius: 15px;
+                    white-space: nowrap;
+                    box-shadow: 0 2px 8px rgba(0, 123, 255, 0.5);
+                    border: 2px solid white;
+                    text-align: center;
+                    min-width: 60px;
+                    font-family: Arial, sans-serif;
+                  ">
+                    ${priceText}
+                  </div>
+                `,
+                iconSize: [80, 30],
+                iconAnchor: [40, 15]
+              })
+              
+              const marker = L.marker([lat, lng], { icon: customIcon }).addTo(this.hotelMap)
+              
+              const popupContent = `
+                <div style="min-width: 150px; text-align: center;">
+                  <h4 style="margin: 0 0 0.5rem 0;">${this.hotel.name}</h4>
+                  <p style="margin: 0; color: #6c757d;">${this.hotel.city}, ${this.hotel.country}</p>
+                </div>
+              `
+              
+              marker.bindPopup(popupContent)
+            }
+          }
+        })
+      }
+    },
+
+    // Konum sekmesi değiştiğinde haritayı başlat
+    onTabChange(tab) {
+      this.activeTab = tab
+      if (tab === 'location') {
+        setTimeout(() => {
+          this.initializeHotelMap()
+        }, 100)
+      }
     }
   },
 
   async created() {
     // Initialize auth from localStorage
     this.$store.dispatch('initializeAuth')
-    await this.loadHotelDetail()
+    await this.fetchHotelDetail()
+  },
+
+  beforeUnmount() {
+    // Clean up map
+    if (this.hotelMap) {
+      this.hotelMap.remove()
+    }
   }
 }
 </script>
@@ -623,24 +727,40 @@ export default {
   font-weight: bold;
 }
 
-.location-map {
-  margin-top: 1rem;
-}
-
-.map-placeholder {
-  height: 300px;
-  background: #f8f9fa;
+.hotel-map-container {
+  margin: 1rem 0;
   border-radius: 8px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  color: #6c757d;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
-.map-icon {
-  font-size: 3rem;
-  margin-bottom: 1rem;
+.hotel-map {
+  height: 300px;
+  width: 100%;
+}
+
+.location-actions {
+  margin: 1.5rem 0;
+  text-align: center;
+}
+
+.map-btn {
+  background: #28a745;
+  color: white;
+  border: none;
+  padding: 0.75rem 1.5rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1rem;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  transition: background 0.3s;
+}
+
+.map-btn:hover {
+  background: #218838;
 }
 
 .reviews-summary {

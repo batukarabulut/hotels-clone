@@ -319,9 +319,13 @@ export default createStore({
         })
         
         const data = await response.json()
-        commit('SET_CURRENT_HOTEL', data)
         
-        return data
+        if (response.ok) {
+          commit('SET_CURRENT_HOTEL', data)
+          return data
+        } else {
+          throw new Error(data.error || 'Otel detayları yüklenirken hata oluştu')
+        }
       } catch (error) {
         const errorMessage = error.message || 'Otel detayları yüklenirken hata oluştu'
         commit('SET_ERROR', errorMessage)
