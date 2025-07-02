@@ -1,5 +1,24 @@
-from django.contrib.auth.models import AbstractUser
+# backend/users/models.py
+from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.db import models
+
+class UserManager(BaseUserManager):
+    def create_user(self, email, password=None, **extra_fields):
+        if not email:
+            raise ValueError('Email alanı gereklidir')
+        email = self.normalize_email(email)
+        extra_fields.setdefault('username', email)  # Username olarak email kullan
+        user = self.model(email=email, **extra_fields)
+        user.set_password(password)
+        user.save(using=self._db)
+        return user
+    
+    def create_superuser(self, email, password=None, **extra_fields):
+        extra_fields.setdefault('is_staff', True)
+        extra_fields.setdefault('is_superuser', True)
+        extra_fields.setdefault('country', 'Turkey')  # Default değerler
+        extra_fields.setdefault('city', 'Istanbul')
+        return self.create_user(email, password, **extra_fields)
 
 class User(AbstractUser):
     country = models.CharField(max_length=100)
@@ -7,8 +26,10 @@ class User(AbstractUser):
     photo = models.ImageField(upload_to='user_photos/', blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     
+    objects = UserManager()
+    
     def __str__(self):
-        return self.username
+        return self.email
 
 # backend/hotels/models.py
 from django.db import models
@@ -161,6 +182,3 @@ class Booking(models.Model):
     
     class Meta:
         ordering = ['-created_at']
-
-# Don't forget to update settings.py to use custom user model
-# AUTH_USER_MODEL = 'users.User'
